@@ -1,31 +1,33 @@
+import base64
 import json
 import os
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
 from fastapi import APIRouter, Form, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.common import CSRF_TOKEN, csrf_or_403, write_audit
+
+# Move-task statuses during which messages are still leaving the DLQ.
+ACTIVE_MOVE_STATUSES = frozenset({"RUNNING", "CANCELLING"})
 
 
 @dataclass(frozen=True)
 class QueueMapping:
     name: str
     arn: str
-    url: str | None
     deadletter_queue_arn: str
 
     @property
     def dlq_name(self) -> str:
         return self.deadletter_queue_arn.rsplit(":", 1)[1]
-
-    @property
-    def source_name(self) -> str:
-        return self.arn.rsplit(":", 1)[1]
 
 
 def _load_queues() -> list[QueueMapping]:
@@ -46,57 +48,55 @@ def _load_queues() -> list[QueueMapping]:
             QueueMapping(
                 name=item["name"],
                 arn=item["arn"],
-                url=item.get("url"),
                 deadletter_queue_arn=item["deadletter_queue_arn"],
             )
         )
     return queue_mappings
 
 
-def has_queue_mappings() -> bool:
-    return len(_load_queues()) > 0
-
-
+@lru_cache
 def get_sqs_client():
     return boto3.client("sqs", region_name=os.getenv("AWS_REGION", "eu-west-2"))
 
 
-def _resolve_queue(mapping: QueueMapping, client) -> tuple[str, str]:
-    queue_url = mapping.url
-    if not queue_url:
-        queue_url = client.get_queue_url(QueueName=mapping.source_name)["QueueUrl"]
-    dlq_url = client.get_queue_url(QueueName=mapping.dlq_name)["QueueUrl"]
-    return queue_url, dlq_url
+def _dlq_url(mapping: QueueMapping, client) -> str:
+    return client.get_queue_url(QueueName=mapping.dlq_name)["QueueUrl"]
 
 
 def _list_move_task(mapping: QueueMapping, client) -> dict[str, Any] | None:
-    try:
-        response = client.list_message_move_tasks(
-            SourceArn=mapping.deadletter_queue_arn, MaxResults=1
-        )
-    except NotImplementedError:
-        return None
+    response = client.list_message_move_tasks(SourceArn=mapping.deadletter_queue_arn, MaxResults=1)
     tasks = response.get("Results", [])
     return tasks[0] if tasks else None
 
 
+def _is_active(move_task: dict[str, Any] | None) -> bool:
+    return bool(move_task) and move_task.get("Status") in ACTIVE_MOVE_STATUSES
+
+
 def _queue_row(mapping: QueueMapping, client) -> dict[str, Any]:
-    queue_url, dlq_url = _resolve_queue(mapping, client)
-    attrs = client.get_queue_attributes(
-        QueueUrl=dlq_url,
-        AttributeNames=["ApproximateNumberOfMessages"],
-    )["Attributes"]
-    move_task = _list_move_task(mapping, client)
-    return {
+    row: dict[str, Any] = {
         "name": mapping.name,
-        "arn": mapping.arn,
-        "url": queue_url,
         "dlq_arn": mapping.deadletter_queue_arn,
-        "dlq_url": dlq_url,
         "dlq_name": mapping.dlq_name,
-        "message_count": int(attrs.get("ApproximateNumberOfMessages", "0")),
-        "move_task": move_task,
+        "message_count": 0,
+        "move_task": None,
+        "task_active": False,
+        "error": None,
     }
+    # One broken queue must not hide the others, so a failure stays on its own row.
+    try:
+        attrs = client.get_queue_attributes(
+            QueueUrl=_dlq_url(mapping, client),
+            AttributeNames=["ApproximateNumberOfMessages"],
+        )["Attributes"]
+        move_task = _list_move_task(mapping, client)
+    except ClientError as err:
+        row["error"] = err.response.get("Error", {}).get("Code", "Unknown")
+        return row
+    row["message_count"] = int(attrs.get("ApproximateNumberOfMessages", "0"))
+    row["move_task"] = move_task
+    row["task_active"] = _is_active(move_task)
+    return row
 
 
 def create_router(
@@ -120,6 +120,14 @@ def create_router(
     def index(request: Request):
         client = get_sqs_client()
         rows = [_queue_row(mapping, client) for mapping in queue_mappings]
+        for row in rows:
+            if row["error"]:
+                write_audit(
+                    app_context,
+                    "aws.error",
+                    "failure",
+                    {"sqs": {"source_dlq_arn": row["dlq_arn"]}, "error": {"code": row["error"]}},
+                )
         write_audit(app_context, "tool.opened", "success")
         return templates.TemplateResponse(
             request=request,
@@ -175,7 +183,7 @@ def create_router(
         csrf_or_403(request, csrf_token)
         mapping = _mapping_for_dlq(dlq_arn)
         client = get_sqs_client()
-        client.cancel_message_move_task(SourceArn=mapping.deadletter_queue_arn, TaskHandle=task_handle)
+        client.cancel_message_move_task(TaskHandle=task_handle)
         write_audit(
             app_context,
             "redrive.cancelled",
@@ -191,19 +199,18 @@ def create_router(
 
         mapping = _mapping_for_dlq(dlq_arn)
         client = get_sqs_client()
-        move_task = _list_move_task(mapping, client)
-        if move_task and move_task.get("Status") in {"RUNNING", "STARTING"}:
+        if _is_active(_list_move_task(mapping, client)):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Cannot inspect messages while redrive is running",
             )
 
-        _, dlq_url = _resolve_queue(mapping, client)
+        # Long polling asks every SQS host; short polling samples a few and can return nothing.
         response = client.receive_message(
-            QueueUrl=dlq_url,
+            QueueUrl=_dlq_url(mapping, client),
             MaxNumberOfMessages=10,
             VisibilityTimeout=0,
-            WaitTimeSeconds=0,
+            WaitTimeSeconds=2,
             AttributeNames=["All"],
             MessageAttributeNames=["All"],
         )
@@ -218,7 +225,13 @@ def create_router(
                 "messages": {"count": len(message_items), "ids": message_ids},
             },
         )
-        return JSONResponse({"messages": message_items})
+        # Binary message attributes arrive as bytes, which JSON can't carry.
+        return JSONResponse(
+            jsonable_encoder(
+                {"messages": message_items},
+                custom_encoder={bytes: lambda value: base64.b64encode(value).decode("ascii")},
+            )
+        )
 
     @router.get("/health")
     def health():

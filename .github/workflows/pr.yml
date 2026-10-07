@@ -15,7 +15,7 @@ jobs:
     env:
       AWS_REGION: eu-west-2
       AWS_ACCOUNT_ID: "094954420758"
-      ECR_IMAGE_NAME: "cdp-sqs-tool"
+      ECR_IMAGE_NAME: "cdp-aws-tools"
       LOCAL_TAG: "test"
     defaults:
       run:
@@ -24,6 +24,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv with caching
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Run tests
+        run: uv run --frozen pytest
 
       - name: Docker Login
         uses: DEFRA/cdp-build-action/docker-login@main

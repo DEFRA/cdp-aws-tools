@@ -12,12 +12,17 @@ dependencies = [
   "uvicorn[standard]>=0.32.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "httpx>=0.28.0",
   "moto[sqs]>=5.0.0",
   "pytest>=8.3.0",
 ]
 
+[tool.uv]
+package = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The app isn't installed as a package (tool.uv.package = false), so put the repo root on sys.path.
+pythonpath = ["."]

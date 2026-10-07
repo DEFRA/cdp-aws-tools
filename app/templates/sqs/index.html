@@ -8,7 +8,6 @@
 
 {% block content %}
   {% set status_classes = {
-    'STARTING': 'app-tag--purple',
     'RUNNING': 'app-tag--purple',
     'CANCELLING': 'app-tag--purple',
     'COMPLETED': 'govuk-tag--green',
@@ -30,13 +29,20 @@
       <tbody>
         {% for row in queues %}
           {% set task = row.move_task %}
-          {% set task_active = task and task.Status in ['RUNNING', 'STARTING', 'CANCELLING'] %}
+          {% set task_active = row.task_active %}
           <tr class="app-entity-table__row">
             <td class="app-entity-table__cell" data-label="Queue"><code>{{ row.name }}</code></td>
             <td class="app-entity-table__cell" data-label="Dead letter queue"><code>{{ row.dlq_name }}</code></td>
-            <td class="app-entity-table__cell" data-label="Messages">{{ row.message_count }}</td>
+            <td class="app-entity-table__cell" data-label="Messages">
+              {{ "Unknown" if row.error else row.message_count }}
+            </td>
             <td class="app-entity-table__cell" data-label="Redrive">
-              {% if task %}
+              {% if row.error %}
+                <strong class="govuk-tag app-tag govuk-tag--red">Unavailable</strong>
+                <p class="govuk-body-s govuk-!-margin-top-2 govuk-!-margin-bottom-0">
+                  Could not load this queue: {{ row.error }}
+                </p>
+              {% elif task %}
                 <strong class="govuk-tag app-tag {{ status_classes.get(task.Status, 'govuk-tag--grey') }}">
                   {{ task.Status | lower | capitalize }}
                 </strong>
@@ -68,7 +74,8 @@
                   <form
                     method="post"
                     action="{{ base_path }}/redrive"
-                    onsubmit="return confirm('Move {{ row.message_count }} message(s) from {{ row.dlq_name }} back to {{ row.name }}?')"
+                    data-confirm="Move {{ row.message_count }} message(s) from {{ row.dlq_name }} back to {{ row.name }}?"
+                    onsubmit="return confirm(this.dataset.confirm)"
                   >
                     <input type="hidden" name="dlq_arn" value="{{ row.dlq_arn }}" />
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />

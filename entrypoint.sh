@@ -14,7 +14,7 @@ trap _term SIGTERM
 trap _term SIGINT
 
 PORT="${PORT:-8085}"
-TOKEN="${TOKEN:-aws-tools}"
+export TOKEN="${TOKEN:-aws-tools}"
 
 echo "starting cdp-aws-tools PORT=${PORT} TOKEN=${TOKEN}"
 uvicorn app.main:app --host 0.0.0.0 --port "$PORT" &

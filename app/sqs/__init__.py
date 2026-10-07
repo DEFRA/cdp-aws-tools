@@ -1,3 +1,3 @@
-from .routes import create_router, get_sqs_client, has_queue_mappings
+from .routes import create_router, get_sqs_client
 
-__all__ = ["create_router", "get_sqs_client", "has_queue_mappings"]
+__all__ = ["create_router", "get_sqs_client"]

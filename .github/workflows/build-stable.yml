@@ -14,8 +14,8 @@ jobs:
     env:
       AWS_REGION: eu-west-2
       AWS_ACCOUNT_ID: "094954420758"
-      ECR_REPO: "cdp-sqs-tool"
-      ECR_IMAGE_NAME: "cdp-sqs-tool"
+      ECR_REPO: "cdp-aws-tools"
+      ECR_IMAGE_NAME: "cdp-aws-tools"
       LOCAL_TAG: "build"
     defaults:
       run:

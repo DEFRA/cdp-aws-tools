@@ -11,5 +11,6 @@ CSRF_TOKEN = secrets.token_urlsafe(32)
 def csrf_or_403(request: Request, csrf_token: str) -> None:
     if request.headers.get("sec-fetch-site") == "cross-site":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cross-site request")
-    if not secrets.compare_digest(csrf_token, CSRF_TOKEN):
+    # Compared as bytes: compare_digest raises TypeError on non-ASCII str.
+    if not secrets.compare_digest(csrf_token.encode(), CSRF_TOKEN.encode()):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")

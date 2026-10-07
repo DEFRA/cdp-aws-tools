@@ -1,5 +1,4 @@
 import os
-import time
 from pathlib import Path
 
 from botocore.exceptions import ClientError
@@ -9,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.common import configure_log_level, load_app_context, write_audit
-from app.sqs import create_router, has_queue_mappings
+from app.sqs import create_router
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 configure_log_level(os.getenv("LOG_LEVEL", "INFO"))
@@ -19,23 +18,12 @@ app_context = load_app_context()
 BASE_PATH = f"/{os.getenv('TOKEN', '').strip('/')}".rstrip("/")
 
 app = FastAPI(title="cdp-aws-tools")
-if has_queue_mappings():
-    router, index, health = create_router(
-        app_context=app_context,
-        base_path=BASE_PATH,
-        templates=templates,
-    )
-    app.include_router(router, prefix=BASE_PATH)
-else:
-
-    def index(_: Request):
-        return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content={"detail": "No tool routes configured"},
-        )
-
-    def health():
-        return {"status": "ok", "time": int(time.time())}
+router, index, health = create_router(
+    app_context=app_context,
+    base_path=BASE_PATH,
+    templates=templates,
+)
+app.include_router(router, prefix=BASE_PATH)
 
 app.mount(
     f"{BASE_PATH}/static",
