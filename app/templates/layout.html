@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" class="govuk-template govuk-template--rebranded">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ tool_title }} | {{ service }}</title>
+    <link rel="stylesheet" href="{{ base_path }}/static/app.css" />
+  </head>
+  <body class="govuk-template__body">
+    <div class="govuk-width-container">
+      <main class="govuk-main-wrapper app-main-wrapper" id="main-content">
+        <span class="govuk-caption-l">{{ service }} in {{ environment }}</span>
+        <div class="app-page-heading">
+          <h1 class="app-page-heading--title">{{ tool_title }}</h1>
+          {% block intro %}{% endblock %}
+        </div>
+
+        {% if not show_message_content %}
+          <div class="app-info app-info--slim" role="note">
+            <span class="app-info__content">
+              Message content is hidden. In prod you need break glass access to view it.
+            </span>
+          </div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </body>
+</html>

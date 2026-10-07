@@ -1,0 +1,36 @@
+// Built from cdp-portal-frontend's own Sass so the tool matches the portal.
+// Regenerate app/static/app.css with scripts/build-styles.sh.
+@use 'govuk-frontend';
+
+@use 'variables';
+@use 'helpers';
+@use 'core';
+
+@use 'button/button';
+@use 'entity-table/entity-table';
+@use 'info/info';
+@use 'page-heading/page-heading';
+@use 'tag/tag';
+
+@use 'govuk-frontend' as *;
+@use 'variables/colours' as *;
+@use 'variables/border-radius' as *;
+
+.app-sqs__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: govuk-spacing(2);
+  align-items: center;
+
+  form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: govuk-spacing(2);
+    align-items: center;
+    margin: 0;
+  }
+
+  .govuk-input {
+    border-radius: $app-border-radius;
+  }
+}

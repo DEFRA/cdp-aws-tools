@@ -1,0 +1,113 @@
+{% extends "layout.html" %}
+
+{% block intro %}
+  <p class="app-page-heading--intro">
+    Your service's dead letter queues. A redrive moves their messages back to the source queue.
+  </p>
+{% endblock %}
+
+{% block content %}
+  {% set status_classes = {
+    'STARTING': 'app-tag--purple',
+    'RUNNING': 'app-tag--purple',
+    'CANCELLING': 'app-tag--purple',
+    'COMPLETED': 'govuk-tag--green',
+    'FAILED': 'govuk-tag--red',
+    'CANCELLED': 'govuk-tag--grey'
+  } %}
+
+  <article>
+    <table class="app-entity-table">
+      <thead class="app-entity-table__head">
+        <tr>
+          <th scope="col" class="app-entity-table__heading">Queue</th>
+          <th scope="col" class="app-entity-table__heading">Dead letter queue</th>
+          <th scope="col" class="app-entity-table__heading" width="10%">Messages</th>
+          <th scope="col" class="app-entity-table__heading">Redrive</th>
+          <th scope="col" class="app-entity-table__heading" width="35%">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in queues %}
+          {% set task = row.move_task %}
+          {% set task_active = task and task.Status in ['RUNNING', 'STARTING', 'CANCELLING'] %}
+          <tr class="app-entity-table__row">
+            <td class="app-entity-table__cell" data-label="Queue"><code>{{ row.name }}</code></td>
+            <td class="app-entity-table__cell" data-label="Dead letter queue"><code>{{ row.dlq_name }}</code></td>
+            <td class="app-entity-table__cell" data-label="Messages">{{ row.message_count }}</td>
+            <td class="app-entity-table__cell" data-label="Redrive">
+              {% if task %}
+                <strong class="govuk-tag app-tag {{ status_classes.get(task.Status, 'govuk-tag--grey') }}">
+                  {{ task.Status | lower | capitalize }}
+                </strong>
+                <p class="govuk-body-s govuk-!-margin-top-2 govuk-!-margin-bottom-0">
+                  {{ task.ApproximateNumberOfMessagesMoved | default(0) }} of
+                  {{ task.ApproximateNumberOfMessagesToMove | default(0) }} moved
+                </p>
+                {% if task.FailureReason %}
+                  <p class="govuk-body-s govuk-!-margin-bottom-0">{{ task.FailureReason }}</p>
+                {% endif %}
+              {% else %}
+                <span class="govuk-body-s">None</span>
+              {% endif %}
+            </td>
+            <td class="app-entity-table__cell" data-label="Actions">
+              <div class="app-sqs__actions">
+                {% if task_active %}
+                  {% if task.TaskHandle %}
+                    <form method="post" action="{{ base_path }}/cancel">
+                      <input type="hidden" name="dlq_arn" value="{{ row.dlq_arn }}" />
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                      <input type="hidden" name="task_handle" value="{{ task.TaskHandle }}" />
+                      <button type="submit" class="govuk-button app-button app-button--small app-button--destructive">
+                        Cancel redrive
+                      </button>
+                    </form>
+                  {% endif %}
+                {% elif row.message_count | int > 0 %}
+                  <form
+                    method="post"
+                    action="{{ base_path }}/redrive"
+                    onsubmit="return confirm('Move {{ row.message_count }} message(s) from {{ row.dlq_name }} back to {{ row.name }}?')"
+                  >
+                    <input type="hidden" name="dlq_arn" value="{{ row.dlq_arn }}" />
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <label class="govuk-visually-hidden" for="rate-{{ loop.index }}">
+                      Maximum messages per second, 1 to {{ max_messages_per_second }} (optional)
+                    </label>
+                    <input
+                      class="govuk-input govuk-input--width-5"
+                      id="rate-{{ loop.index }}"
+                      name="max_messages_per_second"
+                      type="number"
+                      min="1"
+                      max="{{ max_messages_per_second }}"
+                      step="1"
+                      inputmode="numeric"
+                      placeholder="msg/s"
+                      title="Optional. Maximum messages moved per second, 1 to {{ max_messages_per_second }}. Empty lets AWS choose."
+                    />
+                    <button type="submit" class="govuk-button app-button app-button--small app-button--primary">
+                      Start redrive
+                    </button>
+                  </form>
+                {% endif %}
+                {% if show_message_content and row.message_count | int > 0 and not task_active %}
+                  <a class="app-link govuk-link" href="{{ base_path }}/messages?dlq_arn={{ row.dlq_arn | urlencode }}">
+                    View messages (JSON)
+                  </a>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr class="app-entity-table__row--no-results">
+            <td class="app-entity-table__cell" colspan="5">
+              This service has no queues with a dead letter queue in {{ environment }}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </article>
+{% endblock %}

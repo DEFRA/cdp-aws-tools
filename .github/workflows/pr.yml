@@ -1,0 +1,37 @@
+name: Test Pull Request
+on:
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  id-token: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  build:
+    name: "Test Pull Request"
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: eu-west-2
+      AWS_ACCOUNT_ID: "094954420758"
+      ECR_IMAGE_NAME: "cdp-sqs-tool"
+      LOCAL_TAG: "test"
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Docker Login
+        uses: DEFRA/cdp-build-action/docker-login@main
+        with:
+          iam-role-name: github-ecr-role
+
+      - name: Build image
+        uses: DEFRA/cdp-build-action/docker-build/build-image@main
+        with:
+          image_name: ${{ env.ECR_IMAGE_NAME }}
+          tag: ${{ env.LOCAL_TAG }}

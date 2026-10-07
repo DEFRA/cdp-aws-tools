@@ -2,5 +2,3 @@
 __pycache__/
 *.pyc
 .venv/
-.idea/
-*.egg-info/

@@ -1,0 +1,11 @@
+{% extends "layout.html" %}
+
+{% block intro %}
+  <p class="app-page-heading--intro">
+    Recent messages from the selected dead letter queue.
+  </p>
+{% endblock %}
+
+{% block content %}
+  <pre>{{ messages_json }}</pre>
+{% endblock %}
