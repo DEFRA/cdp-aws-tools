@@ -64,7 +64,9 @@ def _dlq_url(mapping: QueueMapping, client) -> str:
 
 
 def _list_move_task(mapping: QueueMapping, client) -> dict[str, Any] | None:
-    response = client.list_message_move_tasks(SourceArn=mapping.deadletter_queue_arn, MaxResults=1)
+    response = client.list_message_move_tasks(
+        SourceArn=mapping.deadletter_queue_arn, MaxResults=1
+    )
     tasks = response.get("Results", [])
     return tasks[0] if tasks else None
 
@@ -126,7 +128,10 @@ def create_router(
                     app_context,
                     "aws.error",
                     "failure",
-                    {"sqs": {"source_dlq_arn": row["dlq_arn"]}, "error": {"code": row["error"]}},
+                    {
+                        "sqs": {"source_dlq_arn": row["dlq_arn"]},
+                        "error": {"code": row["error"]},
+                    },
                 )
         write_audit(app_context, "tool.opened", "success")
         return templates.TemplateResponse(
@@ -150,7 +155,9 @@ def create_router(
         request: Request,
         dlq_arn: str = Form(...),
         csrf_token: str = Form(default=""),
-        max_messages_per_second: int | None = Form(default=None, ge=1, le=max_messages_per_second),
+        max_messages_per_second: int | None = Form(
+            default=None, ge=1, le=max_messages_per_second
+        ),
     ):
         csrf_or_403(request, csrf_token)
         mapping = _mapping_for_dlq(dlq_arn)
@@ -167,7 +174,10 @@ def create_router(
             "redrive.started",
             "success",
             {
-                "sqs": {"source_dlq_arn": mapping.deadletter_queue_arn, "destination_arn": mapping.arn},
+                "sqs": {
+                    "source_dlq_arn": mapping.deadletter_queue_arn,
+                    "destination_arn": mapping.arn,
+                },
                 "task": {"handle": response.get("TaskHandle")},
             },
         )
@@ -188,19 +198,26 @@ def create_router(
             app_context,
             "redrive.cancelled",
             "success",
-            {"sqs": {"source_dlq_arn": mapping.deadletter_queue_arn}, "task": {"handle": task_handle}},
+            {
+                "sqs": {"source_dlq_arn": mapping.deadletter_queue_arn},
+                "task": {"handle": task_handle},
+            },
         )
         return RedirectResponse(f"{base_path}/", status_code=status.HTTP_303_SEE_OTHER)
 
     @router.get("/status")
     def redrive_status(dlq_arn: str):
         mapping = _mapping_for_dlq(dlq_arn)
-        return {"redrive_active": _is_active(_list_move_task(mapping, get_sqs_client()))}
+        return {
+            "redrive_active": _is_active(_list_move_task(mapping, get_sqs_client()))
+        }
 
     @router.get("/messages")
     def messages(dlq_arn: str):
         if not app_context["show_message_content"]:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not available")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Not available"
+            )
 
         mapping = _mapping_for_dlq(dlq_arn)
         client = get_sqs_client()
@@ -222,7 +239,11 @@ def create_router(
             MessageAttributeNames=["All"],
         )
         message_items = list(
-            {m["MessageId"]: m for m in response.get("Messages", []) if m.get("MessageId")}.values()
+            {
+                m["MessageId"]: m
+                for m in response.get("Messages", [])
+                if m.get("MessageId")
+            }.values()
         )
         message_ids = [m["MessageId"] for m in message_items]
         write_audit(
@@ -238,7 +259,9 @@ def create_router(
         return JSONResponse(
             jsonable_encoder(
                 {"messages": message_items},
-                custom_encoder={bytes: lambda value: base64.b64encode(value).decode("ascii")},
+                custom_encoder={
+                    bytes: lambda value: base64.b64encode(value).decode("ascii")
+                },
             )
         )
 
