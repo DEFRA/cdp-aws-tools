@@ -37,7 +37,7 @@ run `uv lock` and commit the result.
 ## Styles
 
 The UI uses cdp-portal-frontend's own Sass (GOV.UK Frontend settings, CDP colours, and the `entity-table`, `tag`,
-`button`, `info` and `page-heading` components), so it looks like the portal it is shown in.
+`button`, `info`, `loader` and `page-heading` components), so it looks like the portal it is shown in.
 `app/static/app.css` and `app/static/govuk/fonts` are generated and committed. `app/static/VERSION` records the
 govuk-frontend version and portal commit they were built from.
 

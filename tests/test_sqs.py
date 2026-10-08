@@ -453,20 +453,24 @@ def test_page_polls_status_while_redrive_runs(monkeypatch, move_tasks):
 
     assert "/status" not in client.get("/").text
     assert client.get("/status", params=status_params).json() == {
-        "redrive_active": False
+        "redrive_active": False,
+        "message_count": 1,
     }
 
     move_tasks.append({"TaskHandle": "handle-1", "Status": "RUNNING"})
     page = client.get("/").text
     assert "/status" in page
     assert json.dumps([dlq_arn]) in page
+    assert f'id="messages-{dlq_arn}"' in page
     assert client.get("/status", params=status_params).json() == {
-        "redrive_active": True
+        "redrive_active": True,
+        "message_count": 1,
     }
 
     move_tasks[0]["Status"] = "COMPLETED"
     assert client.get("/status", params=status_params).json() == {
-        "redrive_active": False
+        "redrive_active": False,
+        "message_count": 1,
     }
 
 

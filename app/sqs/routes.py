@@ -75,6 +75,14 @@ def _is_active(move_task: dict[str, Any] | None) -> bool:
     return bool(move_task) and move_task.get("Status") in ACTIVE_MOVE_STATUSES
 
 
+def _message_count(mapping: QueueMapping, client) -> int:
+    attrs = client.get_queue_attributes(
+        QueueUrl=_dlq_url(mapping, client),
+        AttributeNames=["ApproximateNumberOfMessages"],
+    )["Attributes"]
+    return int(attrs.get("ApproximateNumberOfMessages", "0"))
+
+
 def _queue_row(mapping: QueueMapping, client) -> dict[str, Any]:
     row: dict[str, Any] = {
         "name": mapping.name,
@@ -87,15 +95,12 @@ def _queue_row(mapping: QueueMapping, client) -> dict[str, Any]:
     }
     # One broken queue must not hide the others, so a failure stays on its own row.
     try:
-        attrs = client.get_queue_attributes(
-            QueueUrl=_dlq_url(mapping, client),
-            AttributeNames=["ApproximateNumberOfMessages"],
-        )["Attributes"]
+        message_count = _message_count(mapping, client)
         move_task = _list_move_task(mapping, client)
     except ClientError as err:
         row["error"] = err.response.get("Error", {}).get("Code", "Unknown")
         return row
-    row["message_count"] = int(attrs.get("ApproximateNumberOfMessages", "0"))
+    row["message_count"] = message_count
     row["move_task"] = move_task
     row["task_active"] = _is_active(move_task)
     return row
@@ -208,8 +213,10 @@ def create_router(
     @router.get("/status")
     def redrive_status(dlq_arn: str):
         mapping = _mapping_for_dlq(dlq_arn)
+        client = get_sqs_client()
         return {
-            "redrive_active": _is_active(_list_move_task(mapping, get_sqs_client()))
+            "redrive_active": _is_active(_list_move_task(mapping, client)),
+            "message_count": _message_count(mapping, client),
         }
 
     @router.get("/messages")
