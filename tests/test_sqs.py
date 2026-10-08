@@ -345,6 +345,35 @@ def test_messages_with_binary_attribute(monkeypatch):
 
 
 @mock_aws
+def test_messages_deduplicated_by_message_id(monkeypatch):
+    mappings, dlq, dlq_arn = _create_queues("refunds")
+    monkeypatch.setenv("SQS_QUEUES", mappings)
+    module = _load_module(monkeypatch, show_message_content="true")
+    client = TestClient(module.app)
+    sqs_routes = importlib.import_module("app.sqs.routes")
+    message = {"MessageId": "msg-1", "ReceiptHandle": "rh", "Body": "once"}
+
+    with Stubber(sqs_routes.get_sqs_client()) as stubber:
+        stubber.add_response("get_queue_url", {"QueueUrl": dlq}, {"QueueName": "refunds-deadletter"})
+        stubber.add_response(
+            "receive_message",
+            {"Messages": [{**message, "ReceiptHandle": f"rh-{i}"} for i in range(3)]},
+            {
+                "QueueUrl": dlq,
+                "MaxNumberOfMessages": 10,
+                "VisibilityTimeout": 3,
+                "WaitTimeSeconds": 2,
+                "MessageSystemAttributeNames": ["SentTimestamp"],
+                "MessageAttributeNames": ["All"],
+            },
+        )
+        response = client.get("/messages", params={"dlq_arn": dlq_arn})
+
+    assert response.status_code == 200
+    assert [m["MessageId"] for m in response.json()["messages"]] == ["msg-1"]
+
+
+@mock_aws
 def test_no_queues_shows_empty_state(monkeypatch):
     monkeypatch.setenv("SQS_QUEUES", "[]")
     module = _load_module(monkeypatch, token="tok123")

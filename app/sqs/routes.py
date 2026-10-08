@@ -206,16 +206,20 @@ def create_router(
             )
 
         # Long polling asks every SQS host; short polling samples a few and can return nothing.
+        # The visibility timeout must outlast the poll, or SQS hands the same message back to fill the batch.
+        wait_seconds = 2
         response = client.receive_message(
             QueueUrl=_dlq_url(mapping, client),
             MaxNumberOfMessages=10,
-            VisibilityTimeout=0,
-            WaitTimeSeconds=2,
-            AttributeNames=["All"],
+            VisibilityTimeout=wait_seconds + 1,
+            WaitTimeSeconds=wait_seconds,
+            MessageSystemAttributeNames=["SentTimestamp"],
             MessageAttributeNames=["All"],
         )
-        message_items = response.get("Messages", [])
-        message_ids = [m.get("MessageId") for m in message_items if m.get("MessageId")]
+        message_items = list(
+            {m["MessageId"]: m for m in response.get("Messages", []) if m.get("MessageId")}.values()
+        )
+        message_ids = [m["MessageId"] for m in message_items]
         write_audit(
             app_context,
             "messages.viewed",
