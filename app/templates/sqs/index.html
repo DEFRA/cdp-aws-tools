@@ -117,4 +117,21 @@
       </tbody>
     </table>
   </article>
+
+  {% set active_dlqs = queues | selectattr("task_active") | map(attribute="dlq_arn") | list %}
+  {% if active_dlqs %}
+    <script>
+      const activeDlqs = {{ active_dlqs | tojson }}
+      const poll = setInterval(async () => {
+        for (const dlqArn of activeDlqs) {
+          const response = await fetch(`{{ base_path }}/status?dlq_arn=${encodeURIComponent(dlqArn)}`)
+          if (response.ok && !(await response.json()).redrive_active) {
+            clearInterval(poll)
+            window.location.reload()
+            return
+          }
+        }
+      }, 5000)
+    </script>
+  {% endif %}
 {% endblock %}

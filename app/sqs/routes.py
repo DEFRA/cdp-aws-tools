@@ -192,6 +192,11 @@ def create_router(
         )
         return RedirectResponse(f"{base_path}/", status_code=status.HTTP_303_SEE_OTHER)
 
+    @router.get("/status")
+    def redrive_status(dlq_arn: str):
+        mapping = _mapping_for_dlq(dlq_arn)
+        return {"redrive_active": _is_active(_list_move_task(mapping, get_sqs_client()))}
+
     @router.get("/messages")
     def messages(dlq_arn: str):
         if not app_context["show_message_content"]:

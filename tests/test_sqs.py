@@ -5,6 +5,7 @@ from functools import lru_cache
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from botocore.stub import Stubber
 from fastapi.testclient import TestClient
 from moto import mock_aws
@@ -342,6 +343,56 @@ def test_messages_with_binary_attribute(monkeypatch):
     assert response.status_code == 200
     attribute = response.json()["messages"][0]["MessageAttributes"]["blob"]
     assert attribute["BinaryValue"] == base64.b64encode(b"\xff\x00").decode()
+
+
+@mock_aws
+def test_page_polls_status_while_redrive_runs(monkeypatch, move_tasks):
+    mappings, dlq, dlq_arn = _create_queues("returns")
+    boto3.client("sqs", region_name="eu-west-2").send_message(QueueUrl=dlq, MessageBody="stuck")
+    monkeypatch.setenv("SQS_QUEUES", mappings)
+    module = _load_module(monkeypatch)
+    client = TestClient(module.app)
+    status_params = {"dlq_arn": dlq_arn}
+
+    assert "/status" not in client.get("/").text
+    assert client.get("/status", params=status_params).json() == {"redrive_active": False}
+
+    move_tasks.append({"TaskHandle": "handle-1", "Status": "RUNNING"})
+    page = client.get("/").text
+    assert "/status" in page
+    assert json.dumps([dlq_arn]) in page
+    assert client.get("/status", params=status_params).json() == {"redrive_active": True}
+
+    move_tasks[0]["Status"] = "COMPLETED"
+    assert client.get("/status", params=status_params).json() == {"redrive_active": False}
+
+
+@mock_aws
+def test_status_unknown_dlq_is_404(monkeypatch):
+    mappings, _, _ = _create_queues("returns")
+    monkeypatch.setenv("SQS_QUEUES", mappings)
+    module = _load_module(monkeypatch)
+    client = TestClient(module.app)
+
+    unknown_dlq = "arn:aws:sqs:eu-west-2:000000000000:other"
+    assert client.get("/status", params={"dlq_arn": unknown_dlq}).status_code == 404
+
+
+@mock_aws
+def test_status_aws_error_is_not_reported_as_finished(monkeypatch):
+    mappings, _, dlq_arn = _create_queues("returns")
+    monkeypatch.setenv("SQS_QUEUES", mappings)
+    module = _load_module(monkeypatch)
+    client = TestClient(module.app)
+
+    def throttled(**_):
+        raise ClientError({"Error": {"Code": "ThrottlingException"}}, "ListMessageMoveTasks")
+
+    sqs_routes = importlib.import_module("app.sqs.routes")
+    sqs_routes.get_sqs_client().list_message_move_tasks = throttled
+
+    # A non-2xx makes the page skip this poll instead of reloading mid-redrive.
+    assert client.get("/status", params={"dlq_arn": dlq_arn}).status_code == 502
 
 
 @mock_aws
