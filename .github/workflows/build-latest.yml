@@ -1,0 +1,84 @@
+name: Build latest
+on:
+  push:
+    branches: ["main"]
+    paths-ignore:
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  build:
+    name: Build latest
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: eu-west-2
+      AWS_ACCOUNT_ID: "094954420758"
+      ECR_REPO: "cdp-aws-tools"
+      ECR_IMAGE_NAME: "cdp-aws-tools"
+      LOCAL_TAG: "build"
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Docker Login
+        uses: DEFRA/cdp-build-action/docker-login@main
+        with:
+          iam-role-name: github-ecr-role
+
+      - name: Build image
+        uses: DEFRA/cdp-build-action/docker-build/build-image@main
+        with:
+          image_name: ${{ env.ECR_IMAGE_NAME }}
+          tag: ${{ env.LOCAL_TAG }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/github-ecr-role
+
+      - run: aws sts get-caller-identity
+        shell: bash
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2.0.1
+        with:
+          mask-password: true
+
+      - name: Tag image with commit sha
+        uses: DEFRA/cdp-build-action/docker-build/tag-image@main
+        with:
+          aws_account_id: ${{ env.AWS_ACCOUNT_ID }}
+          aws_region: ${{ env.AWS_REGION }}
+          ecr_repo: ${{ env.ECR_REPO }}
+          image_name: ${{ env.ECR_IMAGE_NAME }}
+          local_tag: ${{ env.LOCAL_TAG }}
+          desired_tag: ${{ github.sha }}
+
+      - name: Push image to ECR
+        uses: DEFRA/cdp-build-action/docker-build/push-image@main
+        with:
+          aws_account_id: ${{ env.AWS_ACCOUNT_ID }}
+          aws_region: ${{ env.AWS_REGION }}
+          image_name: ${{ env.ECR_IMAGE_NAME }}
+          tag: ${{ github.sha }}
+
+      - name: Re-tag image in ECR to latest
+        uses: DEFRA/cdp-build-action/docker-build/retag-image@main
+        with:
+          aws_account_id: ${{ env.AWS_ACCOUNT_ID }}
+          aws_region: ${{ env.AWS_REGION }}
+          ecr_repo: ${{ env.ECR_REPO }}
+          image_name: ${{ env.ECR_IMAGE_NAME }}
+          commit_hash_tag: ${{ github.sha }}
+          desired_tag: latest

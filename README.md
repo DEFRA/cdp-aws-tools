@@ -4,7 +4,7 @@ Browser UI for SQS operations launched through the CDP webshell flow.
 
 ## Features
 
-- Lists service DLQs with queue depth and oldest-message age.
+- Lists service DLQs with queue depth and redrive status.
 - Starts and cancels native SQS redrives.
 - Optionally shows message content when `SHOW_MESSAGE_CONTENT=true`.
 - Logs user actions as JSON for audit.
@@ -23,14 +23,16 @@ The container is launched by `cdp-ecs-webshell-lambda` and expects:
 ## Local run
 
 ```bash
-uv venv
-uv pip install -e '.[dev]'
+uv sync
 export TOKEN=demo
 export PORT=8085
 export SQS_QUEUES='[]'
 uv run uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
 # open http://localhost:8085/demo/
 ```
+
+Run the tests with `uv run pytest`. Dependencies are pinned in `uv.lock`; after changing them in `pyproject.toml`,
+run `uv lock` and commit the result.
 
 ## Styles
 
