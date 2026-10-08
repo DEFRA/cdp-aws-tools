@@ -12,6 +12,13 @@ from moto import mock_aws
 
 
 @pytest.fixture(autouse=True)
+def _no_endpoint_override(monkeypatch):
+    """A custom endpoint (e.g. LocalStack) bypasses moto, so tests would hit a real, stateful SQS."""
+    monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+    monkeypatch.delenv("AWS_ENDPOINT_URL_SQS", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def move_tasks(monkeypatch):
     """moto doesn't implement ListMessageMoveTasks, so the app's client answers from this list."""
     sqs_routes = importlib.import_module("app.sqs.routes")
@@ -108,6 +115,7 @@ def test_index_and_redrive(monkeypatch):
         follow_redirects=False,
     )
     assert response.status_code == 303
+    assert response.headers["location"] == "/"
 
 
 @mock_aws
@@ -417,6 +425,7 @@ def test_cancel_running_redrive(monkeypatch, move_tasks):
         )
         stubber.assert_no_pending_responses()
     assert response.status_code == 303
+    assert response.headers["location"] == "/"
 
     move_tasks[0]["Status"] = "CANCELLING"
     assert client.get("/messages", params={"dlq_arn": dlq_arn}).status_code == 409
@@ -441,55 +450,32 @@ def test_messages_with_binary_attribute(monkeypatch):
 
 
 @mock_aws
-def test_page_polls_status_while_redrive_runs(monkeypatch, move_tasks):
-    mappings, dlq, dlq_arn = _create_queues("returns")
+def test_running_redrive_asks_user_to_refresh(monkeypatch, move_tasks):
+    mappings, dlq, _ = _create_queues("returns")
     boto3.client("sqs", region_name="eu-west-2").send_message(
         QueueUrl=dlq, MessageBody="stuck"
     )
     monkeypatch.setenv("SQS_QUEUES", mappings)
     module = _load_module(monkeypatch)
     client = TestClient(module.app)
-    status_params = {"dlq_arn": dlq_arn}
+    refresh_hint = "Refresh the page to see progress."
 
-    assert "/status" not in client.get("/").text
-    assert client.get("/status", params=status_params).json() == {
-        "redrive_active": False,
-        "message_count": 1,
-    }
+    idle = client.get("/").text
+    assert refresh_hint not in idle
+    assert 'data-confirm="Move ' in idle
 
     move_tasks.append({"TaskHandle": "handle-1", "Status": "RUNNING"})
-    page = client.get("/").text
-    assert "/status" in page
-    assert json.dumps([dlq_arn]) in page
-    assert f'id="messages-{dlq_arn}"' in page
-    assert client.get("/status", params=status_params).json() == {
-        "redrive_active": True,
-        "message_count": 1,
-    }
+    assert refresh_hint in client.get("/").text
 
     move_tasks[0]["Status"] = "COMPLETED"
-    assert client.get("/status", params=status_params).json() == {
-        "redrive_active": False,
-        "message_count": 1,
-    }
+    assert refresh_hint not in client.get("/").text
 
 
 @mock_aws
-def test_status_unknown_dlq_is_404(monkeypatch):
-    mappings, _, _ = _create_queues("returns")
-    monkeypatch.setenv("SQS_QUEUES", mappings)
-    module = _load_module(monkeypatch)
-    client = TestClient(module.app)
-
-    unknown_dlq = "arn:aws:sqs:eu-west-2:000000000000:other"
-    assert client.get("/status", params={"dlq_arn": unknown_dlq}).status_code == 404
-
-
-@mock_aws
-def test_status_aws_error_is_not_reported_as_finished(monkeypatch):
+def test_aws_error_returns_502(monkeypatch):
     mappings, _, dlq_arn = _create_queues("returns")
     monkeypatch.setenv("SQS_QUEUES", mappings)
-    module = _load_module(monkeypatch)
+    module = _load_module(monkeypatch, show_message_content="true")
     client = TestClient(module.app)
 
     def throttled(**_):
@@ -500,8 +486,7 @@ def test_status_aws_error_is_not_reported_as_finished(monkeypatch):
     sqs_routes = importlib.import_module("app.sqs.routes")
     sqs_routes.get_sqs_client().list_message_move_tasks = throttled
 
-    # A non-2xx makes the page skip this poll instead of reloading mid-redrive.
-    assert client.get("/status", params={"dlq_arn": dlq_arn}).status_code == 502
+    assert client.get("/messages", params={"dlq_arn": dlq_arn}).status_code == 502
 
 
 @mock_aws

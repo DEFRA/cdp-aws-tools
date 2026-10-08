@@ -3,6 +3,7 @@
 {% block intro %}
   <p class="app-page-heading--intro">
     Your service's dead letter queues. A redrive moves their messages back to the source queue.
+    Message counts from AWS are approximate and can take up to a minute to update.
   </p>
 {% endblock %}
 
@@ -14,7 +15,6 @@
     'FAILED': 'govuk-tag--red',
     'CANCELLED': 'govuk-tag--grey'
   } %}
-
   <article>
     <table class="app-entity-table">
       <thead class="app-entity-table__head">
@@ -33,7 +33,7 @@
           <tr class="app-entity-table__row">
             <td class="app-entity-table__cell" data-label="Queue"><code>{{ row.name }}</code></td>
             <td class="app-entity-table__cell" data-label="Dead letter queue"><code>{{ row.dlq_name }}</code></td>
-            <td class="app-entity-table__cell" data-label="Messages" id="messages-{{ row.dlq_arn }}">
+            <td class="app-entity-table__cell" data-label="Messages">
               {{ "Unknown" if row.error else row.message_count }}
             </td>
             <td class="app-entity-table__cell" data-label="Redrive">
@@ -43,16 +43,16 @@
                   Could not load this queue: {{ row.error }}
                 </p>
               {% elif task %}
-                <strong class="govuk-tag app-tag {{ status_classes.get(task.Status, 'govuk-tag--grey') }}{% if task_active %} app-tag--with-loader{% endif %}">
+                <strong class="govuk-tag app-tag {{ status_classes.get(task.Status, 'govuk-tag--grey') }}">
                   {{ task.Status | lower | capitalize }}
-                  {%- if task_active %}
-                    <span class="app-loader app-loader--small app-loader--is-loading govuk-!-margin-left-1" title="Updates automatically"></span>
-                  {%- endif %}
                 </strong>
                 <p class="govuk-body-s govuk-!-margin-top-2 govuk-!-margin-bottom-0">
                   {{ task.ApproximateNumberOfMessagesMoved | default(0) }} of
                   {{ task.ApproximateNumberOfMessagesToMove | default(0) }} moved
                 </p>
+                {% if task_active %}
+                  <p class="govuk-body-s govuk-!-margin-bottom-0">Refresh the page to see progress.</p>
+                {% endif %}
                 {% if task.FailureReason %}
                   <p class="govuk-body-s govuk-!-margin-bottom-0">{{ task.FailureReason }}</p>
                 {% endif %}
@@ -64,21 +64,39 @@
               <div class="app-sqs__actions">
                 {% if task_active %}
                   {% if task.TaskHandle %}
-                    <form method="post" action="{{ base_path }}/cancel">
+                    <form method="post" action="{{ base_path }}/cancel" data-js="app-form">
                       <input type="hidden" name="dlq_arn" value="{{ row.dlq_arn }}" />
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <input type="hidden" name="task_handle" value="{{ task.TaskHandle }}" />
-                      <button type="submit" class="govuk-button app-button app-button--small app-button--destructive">
-                        Cancel redrive
-                      </button>
+                      <span class="app-button__container">
+                        <button
+                          type="submit"
+                          class="govuk-button app-button app-button--small app-button--destructive"
+                          data-js="app-button"
+                          data-testid="app-button"
+                        >
+                          Cancel redrive
+                        </button>
+                        <span
+                          class="app-loader app-loader--with-adjacent-button"
+                          data-testid="app-loader"
+                          data-js="app-loader"
+                        ></span>
+                        <span
+                          class="govuk-visually-hidden"
+                          role="status"
+                          data-js="app-loader-status"
+                          data-loading-text="Cancelling redrive"
+                        ></span>
+                      </span>
                     </form>
                   {% endif %}
                 {% elif row.message_count | int > 0 %}
                   <form
                     method="post"
                     action="{{ base_path }}/redrive"
+                    data-js="app-form"
                     data-confirm="Move {{ row.message_count }} message(s) from {{ row.dlq_name }} back to {{ row.name }}?"
-                    onsubmit="return confirm(this.dataset.confirm)"
                   >
                     <input type="hidden" name="dlq_arn" value="{{ row.dlq_arn }}" />
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -97,9 +115,27 @@
                       placeholder="msg/s"
                       title="Optional. Maximum messages moved per second, 1 to {{ max_messages_per_second }}. Empty lets AWS choose."
                     />
-                    <button type="submit" class="govuk-button app-button app-button--small app-button--primary">
-                      Start redrive
-                    </button>
+                    <span class="app-button__container">
+                      <button
+                        type="submit"
+                        class="govuk-button app-button app-button--small app-button--primary"
+                        data-js="app-button"
+                        data-testid="app-button"
+                      >
+                        Start redrive
+                      </button>
+                      <span
+                        class="app-loader app-loader--with-adjacent-button"
+                        data-testid="app-loader"
+                        data-js="app-loader"
+                      ></span>
+                      <span
+                        class="govuk-visually-hidden"
+                        role="status"
+                        data-js="app-loader-status"
+                        data-loading-text="Starting redrive"
+                      ></span>
+                    </span>
                   </form>
                 {% endif %}
                 {% if show_message_content and row.message_count | int > 0 and not task_active %}
@@ -121,31 +157,35 @@
     </table>
   </article>
 
-  {% set active_dlqs = queues | selectattr("task_active") | map(attribute="dlq_arn") | list %}
-  {% if active_dlqs %}
-    <script>
-      // The message count lags behind the redrive, so keep polling it for a while after the redrive ends.
-      const settlePolls = 6
-      const pollsSinceFinished = new Map({{ active_dlqs | tojson }}.map((dlqArn) => [dlqArn, 0]))
-      const poll = setInterval(async () => {
-        for (const [dlqArn, polls] of pollsSinceFinished) {
-          const response = await fetch(`{{ base_path }}/status?dlq_arn=${encodeURIComponent(dlqArn)}`)
-          if (!response.ok) {
-            continue
-          }
-          const { redrive_active, message_count } = await response.json()
-          document.getElementById(`messages-${dlqArn}`).textContent = message_count
-          if (redrive_active) {
-            continue
-          }
-          if (message_count === 0 || polls + 1 >= settlePolls) {
-            clearInterval(poll)
-            window.location.reload()
-            return
-          }
-          pollsSinceFinished.set(dlqArn, polls + 1)
+  <script>
+    const $forms = document.querySelectorAll('form[data-js="app-form"]')
+
+    $forms.forEach(($form) => {
+      $form.addEventListener("submit", (event) => {
+        if ($form.dataset.confirm && !window.confirm($form.dataset.confirm)) {
+          event.preventDefault()
+          return
         }
-      }, 5000)
-    </script>
-  {% endif %}
+        // Disable straight away so a double click can't send a second POST; only the spinner waits.
+        $form.querySelector('[data-js="app-button"]').disabled = true
+        const $status = $form.querySelector('[data-js="app-loader-status"]')
+        $status.textContent = $status.dataset.loadingText
+        setTimeout(() => {
+          $form.querySelector('[data-js="app-loader"]').classList.add("app-loader--is-loading")
+        }, 200)
+      })
+    })
+
+    // Back/forward cache restores the page as it was left, with the button still disabled.
+    window.addEventListener("pageshow", (event) => {
+      if (!event.persisted) {
+        return
+      }
+      $forms.forEach(($form) => {
+        $form.querySelector('[data-js="app-button"]').disabled = false
+        $form.querySelector('[data-js="app-loader"]').classList.remove("app-loader--is-loading")
+        $form.querySelector('[data-js="app-loader-status"]').textContent = ""
+      })
+    })
+  </script>
 {% endblock %}
