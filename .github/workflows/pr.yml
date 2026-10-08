@@ -35,6 +35,12 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Lint
+        run: uv run --frozen ruff check .
+
+      - name: Format
+        run: uv run --frozen ruff format --check .
+
       - name: Run tests
         run: uv run --frozen pytest
 

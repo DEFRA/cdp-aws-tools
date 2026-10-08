@@ -2,7 +2,6 @@ import secrets
 
 from fastapi import HTTPException, Request, status
 
-
 # webshell-proxy rewrites Host to the task address, so Origin can't be compared with Host.
 # Forms carry this per-process token instead.
 CSRF_TOKEN = secrets.token_urlsafe(32)

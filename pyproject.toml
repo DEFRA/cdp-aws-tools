@@ -17,6 +17,7 @@ dev = [
   "httpx2>=2.13.1",
   "moto[sqs]>=5.0.0",
   "pytest>=8.3.0",
+  "ruff>=0.16.10",
 ]
 
 [tool.uv]
