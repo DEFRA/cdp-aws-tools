@@ -35,7 +35,7 @@
             <td class="app-entity-table__cell" data-label="Dead letter queue"><code>{{ row.dlq_name }}</code></td>
             <td class="app-entity-table__cell" data-label="Messages">
               {{ "Unknown" if row.error else row.message_count }}
-              {% if task and task.Status == 'COMPLETED' and row.message_count | int > 0 %}
+              {% if row.count_may_lag %}
                 <p class="govuk-body-s govuk-!-font-weight-bold govuk-!-margin-top-2 govuk-!-margin-bottom-0">
                   May not have caught up yet. Refresh in a minute.
                 </p>
@@ -55,6 +55,9 @@
                   {{ task.ApproximateNumberOfMessagesMoved | default(0) }} of
                   {{ task.ApproximateNumberOfMessagesToMove | default(0) }} moved
                 </p>
+                {% if row.task_started_at %}
+                  <p class="govuk-body-s govuk-!-margin-bottom-0">Started {{ row.task_started_at }}</p>
+                {% endif %}
                 {% if task_active %}
                   <p class="govuk-body-s govuk-!-font-weight-bold govuk-!-margin-bottom-0">
                     Refresh the page to see progress.

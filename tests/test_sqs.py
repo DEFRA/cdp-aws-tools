@@ -1,6 +1,7 @@
 import base64
 import importlib
 import json
+import time
 from functools import lru_cache
 
 import boto3
@@ -468,9 +469,35 @@ def test_running_redrive_asks_user_to_refresh(monkeypatch, move_tasks):
     assert refresh_hint in client.get("/").text
 
     move_tasks[0]["Status"] = "COMPLETED"
-    completed = client.get("/").text
-    assert refresh_hint not in completed
-    assert "May not have caught up yet. Refresh in a minute." in completed
+    assert refresh_hint not in client.get("/").text
+
+
+@mock_aws
+def test_count_lag_hint_only_shortly_after_redrive(monkeypatch, move_tasks):
+    mappings, dlq, _ = _create_queues("returns")
+    boto3.client("sqs", region_name="eu-west-2").send_message(
+        QueueUrl=dlq, MessageBody="stuck"
+    )
+    monkeypatch.setenv("SQS_QUEUES", mappings)
+    module = _load_module(monkeypatch)
+    client = TestClient(module.app)
+    lag_hint = "May not have caught up yet. Refresh in a minute."
+    now_ms = int(time.time() * 1000)
+
+    move_tasks.append(
+        {"TaskHandle": "h", "Status": "COMPLETED", "StartedTimestamp": now_ms - 60_000}
+    )
+    recent = client.get("/").text
+    assert lag_hint in recent
+    assert "Started " in recent
+
+    move_tasks[0]["StartedTimestamp"] = now_ms - 3 * 24 * 60 * 60 * 1000
+    days_later = client.get("/").text
+    assert lag_hint not in days_later
+    assert "Started " in days_later
+
+    move_tasks[0]["StartedTimestamp"] = 1_760_000_000_000
+    assert "Started 9 Oct 2025 08:53 UTC" in client.get("/").text
 
 
 @mock_aws

@@ -3,6 +3,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
@@ -17,6 +18,9 @@ from app.common import CSRF_TOKEN, csrf_or_403, write_audit
 
 # Move-task statuses during which messages are still leaving the DLQ.
 ACTIVE_MOVE_STATUSES = frozenset({"RUNNING", "CANCELLING"})
+
+# AWS gives no completion time, so the lag window counts from the start of the move task.
+COUNT_LAG_WINDOW_SECONDS = 5 * 60
 
 
 @dataclass(frozen=True)
@@ -103,7 +107,24 @@ def _queue_row(mapping: QueueMapping, client) -> dict[str, Any]:
     row["message_count"] = message_count
     row["move_task"] = move_task
     row["task_active"] = _is_active(move_task)
+    started = _started_at(move_task)
+    row["task_started_at"] = (
+        started.strftime("%-d %b %Y %H:%M UTC") if started else None
+    )
+    row["count_may_lag"] = (
+        started is not None
+        and move_task.get("Status") == "COMPLETED"
+        and message_count > 0
+        and (datetime.now(UTC) - started).total_seconds() < COUNT_LAG_WINDOW_SECONDS
+    )
     return row
+
+
+def _started_at(move_task: dict[str, Any] | None) -> datetime | None:
+    started_ms = (move_task or {}).get("StartedTimestamp")
+    if started_ms is None:
+        return None
+    return datetime.fromtimestamp(started_ms / 1000, UTC)
 
 
 def create_router(
