@@ -468,7 +468,9 @@ def test_running_redrive_asks_user_to_refresh(monkeypatch, move_tasks):
     assert refresh_hint in client.get("/").text
 
     move_tasks[0]["Status"] = "COMPLETED"
-    assert refresh_hint not in client.get("/").text
+    completed = client.get("/").text
+    assert refresh_hint not in completed
+    assert "May not have caught up yet. Refresh in a minute." in completed
 
 
 @mock_aws
