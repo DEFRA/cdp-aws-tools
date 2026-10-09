@@ -4,8 +4,13 @@ import time
 import uuid
 from dataclasses import dataclass
 
+from botocore.exceptions import ClientError
+
 # With the form's rate left empty, move slowly enough to watch a redrive run.
 DEFAULT_MOVE_RATE = 1
+
+# Matches AWS: a second purge of the same queue within 60 seconds fails with PurgeQueueInProgress.
+PURGE_WINDOW_SECONDS = 60
 
 
 @dataclass
@@ -26,6 +31,7 @@ class InMemorySqsStub:
         self._queue_messages = queue_messages
         self._latest_move_task_by_source_arn: dict[str, dict] = {}
         self._move_rate_by_source_arn: dict[str, int] = {}
+        self._last_purge_by_queue_name: dict[str, float] = {}
         self._now = time.time
 
     @classmethod
@@ -117,6 +123,24 @@ class InMemorySqsStub:
         for task in self._latest_move_task_by_source_arn.values():
             if task["TaskHandle"] == TaskHandle and task["Status"] == "RUNNING":
                 task["Status"] = "CANCELLED"
+        return {}
+
+    def purge_queue(self, QueueUrl: str):
+        queue_name = QueueUrl.rsplit("/", 1)[-1]
+        now = self._now()
+        last_purge = self._last_purge_by_queue_name.get(queue_name)
+        if last_purge is not None and (now - last_purge) < PURGE_WINDOW_SECONDS:
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "PurgeQueueInProgress",
+                        "Message": "Only one purge can run every 60 seconds.",
+                    }
+                },
+                "PurgeQueue",
+            )
+        self._queue_messages[queue_name] = []
+        self._last_purge_by_queue_name[queue_name] = now
         return {}
 
     def _advance_move_tasks(self) -> None:

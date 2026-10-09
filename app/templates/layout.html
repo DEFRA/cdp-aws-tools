@@ -16,10 +16,16 @@
           {% block intro %}{% endblock %}
         </div>
 
-        {% if not show_message_content %}
+        {% if not show_message_content or not allow_purge %}
           <div class="app-info app-info--slim" role="note">
             <span class="app-info__content">
-              Message content is hidden. In prod you need break glass access to view it.
+              {% if not show_message_content and not allow_purge %}
+                Message content and purge are hidden. In prod you need break glass access.
+              {% elif not show_message_content %}
+                Message content is hidden. In prod you need break glass access to view it.
+              {% else %}
+                Purge is hidden. In prod you need break glass access.
+              {% endif %}
             </span>
           </div>
         {% endif %}

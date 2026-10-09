@@ -6,6 +6,7 @@ Browser UI for SQS operations launched through the CDP webshell flow.
 
 - Lists service DLQs with queue depth and redrive status.
 - Starts and cancels native SQS redrives.
+- Purges DLQs after typing the queue name to confirm.
 - Optionally shows message content when `SHOW_MESSAGE_CONTENT=true`.
 - Logs user actions as JSON for audit.
 
@@ -17,6 +18,7 @@ The container is launched by `cdp-ecs-webshell-lambda` and expects:
 - `TOKEN` (all routes are served under `/$TOKEN`, because webshell-proxy forwards the path unchanged)
 - `SQS_QUEUES` (JSON array of queue mappings)
 - `SHOW_MESSAGE_CONTENT` (`true` or `false`)
+- `ALLOW_PURGE` (`true` or `false`; in prod this is break-glass gated)
 - `USER_ID`, `USER_NAME`, `SERVICE`, `ENVIRONMENT`
 - `AUDIT_UPLOAD_URL` (optional; used by entrypoint upload step)
 
@@ -31,6 +33,7 @@ export ENVIRONMENT=dev
 export USER_ID=local
 export USER_NAME="Local User"
 export SHOW_MESSAGE_CONTENT=true
+export ALLOW_PURGE=true
 export SQS_STUB_SAMPLE_COUNT=3
 export SQS_QUEUES='[{"name":"orders","arn":"arn:aws:sqs:eu-west-2:000000000000:orders","deadletter_queue_arn":"arn:aws:sqs:eu-west-2:000000000000:orders-deadletter"}]'
 uv run uvicorn dev.main:app --host 0.0.0.0 --port "$PORT"
