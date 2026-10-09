@@ -21,7 +21,7 @@
         <tr>
           <th scope="col" class="app-entity-table__heading">Queue</th>
           <th scope="col" class="app-entity-table__heading">Dead letter queue</th>
-          <th scope="col" class="app-entity-table__heading" width="10%">Messages</th>
+          <th scope="col" class="app-entity-table__heading" width="10%" title="AWS approximate count of visible messages">Messages (approx.)</th>
           <th scope="col" class="app-entity-table__heading">Redrive</th>
           <th scope="col" class="app-entity-table__heading" width="35%">Actions</th>
         </tr>
@@ -31,9 +31,13 @@
           {% set task = row.move_task %}
           {% set task_active = row.task_active %}
           <tr class="app-entity-table__row">
-            <td class="app-entity-table__cell" data-label="Queue"><code>{{ row.name }}</code></td>
-            <td class="app-entity-table__cell" data-label="Dead letter queue"><code>{{ row.dlq_name }}</code></td>
-            <td class="app-entity-table__cell" data-label="Messages">
+            <td class="app-entity-table__cell" data-label="Queue">
+              <code class="app-sqs__name">{{ row.name | wrappable }}</code>
+            </td>
+            <td class="app-entity-table__cell" data-label="Dead letter queue">
+              <code class="app-sqs__name">{{ row.dlq_name | wrappable }}</code>
+            </td>
+            <td class="app-entity-table__cell" data-label="Messages (approx.)">
               {{ "Unknown" if row.error else row.message_count }}
               {% if row.count_may_lag %}
                 <p class="govuk-body-s govuk-!-font-weight-bold govuk-!-margin-top-2 govuk-!-margin-bottom-0">
@@ -111,20 +115,23 @@
                     <input type="hidden" name="dlq_arn" value="{{ row.dlq_arn }}" />
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                     <label class="govuk-visually-hidden" for="rate-{{ loop.index }}">
-                      Maximum messages per second, 1 to {{ max_messages_per_second }} (optional)
+                      Maximum messages per second, 1 to {{ max_messages_per_second }}. Leave empty to let AWS choose.
                     </label>
-                    <input
-                      class="govuk-input govuk-input--width-5"
-                      id="rate-{{ loop.index }}"
-                      name="max_messages_per_second"
-                      type="number"
-                      min="1"
-                      max="{{ max_messages_per_second }}"
-                      step="1"
-                      inputmode="numeric"
-                      placeholder="msg/s"
-                      title="Optional. Maximum messages moved per second, 1 to {{ max_messages_per_second }}. Empty lets AWS choose."
-                    />
+                    <div class="govuk-input__wrapper">
+                      <input
+                        class="govuk-input app-input govuk-input--width-4"
+                        id="rate-{{ loop.index }}"
+                        name="max_messages_per_second"
+                        type="number"
+                        min="1"
+                        max="{{ max_messages_per_second }}"
+                        step="1"
+                        inputmode="numeric"
+                        placeholder="Auto"
+                        title="Optional. Maximum messages moved per second, 1 to {{ max_messages_per_second }}. Empty lets AWS choose."
+                      />
+                      <div class="govuk-input__suffix app-input__suffix" aria-hidden="true">msg/s</div>
+                    </div>
                     <span class="app-button__container">
                       <button
                         type="submit"
@@ -149,8 +156,12 @@
                   </form>
                 {% endif %}
                 {% if show_message_content and row.message_count | int > 0 and not task_active %}
-                  <a class="app-link govuk-link" href="{{ base_path }}/messages?dlq_arn={{ row.dlq_arn | urlencode }}">
-                    View messages (JSON)
+                  <a
+                    class="app-link govuk-link"
+                    href="{{ base_path }}/messages?dlq_arn={{ row.dlq_arn | urlencode }}"
+                    title="Samples up to 10 messages from one SQS receive. The Messages count is approximate and may differ."
+                  >
+                    Sample messages (JSON)
                   </a>
                 {% endif %}
               </div>
