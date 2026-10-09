@@ -20,16 +20,30 @@ The container is launched by `cdp-ecs-webshell-lambda` and expects:
 - `USER_ID`, `USER_NAME`, `SERVICE`, `ENVIRONMENT`
 - `AUDIT_UPLOAD_URL` (optional; used by entrypoint upload step)
 
-## Local run
+## Local run (zero-dependency stub)
 
 ```bash
 uv sync
 export TOKEN=demo
 export PORT=8085
-export SQS_QUEUES='[]'
-uv run uvicorn app.main:app --host 0.0.0.0 --port "$PORT"
+export SERVICE=demo-service
+export ENVIRONMENT=dev
+export USER_ID=local
+export USER_NAME="Local User"
+export SHOW_MESSAGE_CONTENT=true
+export SQS_STUB_SAMPLE_COUNT=3
+export SQS_QUEUES='[{"name":"orders","arn":"arn:aws:sqs:eu-west-2:000000000000:orders","deadletter_queue_arn":"arn:aws:sqs:eu-west-2:000000000000:orders-deadletter"}]'
+uv run uvicorn dev.main:app --host 0.0.0.0 --port "$PORT"
 # open http://localhost:8085/demo/
 ```
+
+`dev.main:app` is the same app with an in-memory fake SQS client swapped in, so no AWS credentials,
+Floci, or LocalStack are needed. `dev/` is not copied into the Docker image.
+
+## Local run (real API target, optional)
+
+If you want to hit a real SQS-compatible endpoint (for example LocalStack), run `app.main:app` instead and set
+`AWS_ENDPOINT_URL` or `AWS_ENDPOINT_URL_SQS`.
 
 Run the tests with `uv run pytest`. Dependencies are pinned in `uv.lock`; after changing them in `pyproject.toml`,
 run `uv lock` and commit the result.

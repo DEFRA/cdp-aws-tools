@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 from botocore.exceptions import ClientError
@@ -6,11 +7,19 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 
 from app.common import configure_log_level, load_app_context, write_audit
 from app.sqs import create_router
 
+
+def wrappable(value: str) -> Markup:
+    """Lets long AWS names wrap after _ and - without changing the copied text."""
+    return Markup(re.sub(r"([_-])", r"\1<wbr>", str(escape(value))))
+
+
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+templates.env.filters["wrappable"] = wrappable
 configure_log_level(os.getenv("LOG_LEVEL", "INFO"))
 app_context = load_app_context()
 

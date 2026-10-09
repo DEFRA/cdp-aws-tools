@@ -183,6 +183,103 @@ def test_messages_visible_with_flag(monkeypatch):
     assert len(response.json()["messages"]) == 1
 
 
+def test_long_queue_names_can_wrap(monkeypatch):
+    monkeypatch.setenv("SQS_QUEUES", "[]")
+    module = _load_module(monkeypatch)
+
+    assert (
+        module.wrappable("forms_events-deadletter")
+        == "forms_<wbr>events-<wbr>deadletter"
+    )
+    assert module.wrappable("<b>_x") == "&lt;b&gt;_<wbr>x"
+
+
+def test_stub_mode_ui_sample_and_redrive(monkeypatch):
+    mappings = json.dumps(
+        [
+            {
+                "name": "orders",
+                "arn": "arn:aws:sqs:eu-west-2:000000000000:orders",
+                "deadletter_queue_arn": "arn:aws:sqs:eu-west-2:000000000000:orders-deadletter",
+            },
+            {
+                "name": "payments",
+                "arn": "arn:aws:sqs:eu-west-2:000000000000:payments",
+                "deadletter_queue_arn": "arn:aws:sqs:eu-west-2:000000000000:payments-deadletter",
+            },
+        ]
+    )
+    monkeypatch.setenv("SQS_STUB_SAMPLE_COUNT", "2")
+    monkeypatch.setenv("SQS_QUEUES", mappings)
+
+    _load_module(monkeypatch, show_message_content="true")
+    # dev.main swaps the client factory on import, so re-import it after the fixture's patch.
+    monkeypatch.delitem(importlib.sys.modules, "dev.main", raising=False)
+    client = TestClient(importlib.import_module("dev.main").app)
+    csrf_module = importlib.import_module("app.common.csrf")
+    payments_dlq = "arn:aws:sqs:eu-west-2:000000000000:payments-deadletter"
+    orders_dlq = "arn:aws:sqs:eu-west-2:000000000000:orders-deadletter"
+
+    home = client.get("/")
+    assert home.status_code == 200
+    assert "orders-deadletter" in home.text
+    assert "payments-deadletter" in home.text
+    assert "Sample messages (JSON)" in home.text
+
+    sample = client.get("/messages", params={"dlq_arn": orders_dlq})
+    assert sample.status_code == 200
+    assert len(sample.json()["messages"]) == 2
+    assert json.loads(sample.json()["messages"][0]["Body"]).get("source") == "sqs-stub"
+
+    redrive = client.post(
+        "/redrive",
+        data={"dlq_arn": payments_dlq, "csrf_token": csrf_module.CSRF_TOKEN},
+        follow_redirects=False,
+    )
+    assert redrive.status_code == 303
+    assert redrive.headers["location"] == "/"
+    stub = importlib.import_module("app.sqs.routes").get_sqs_client()
+    task = stub.list_message_move_tasks(SourceArn=payments_dlq)["Results"][0]
+    assert task["Status"] == "RUNNING"
+    assert "Cancel redrive" in client.get("/").text
+    assert client.get("/messages", params={"dlq_arn": payments_dlq}).status_code == 409
+
+    # The stub moves one message a second by default, so two messages are done after two.
+    started = task["StartedTimestamp"] / 1000
+    stub._now = lambda: started + 2
+    task = stub.list_message_move_tasks(SourceArn=payments_dlq)["Results"][0]
+    assert task["Status"] == "COMPLETED"
+    assert task["ApproximateNumberOfMessagesMoved"] == 2
+
+    moved_messages = client.get("/messages", params={"dlq_arn": payments_dlq})
+    assert moved_messages.status_code == 200
+    assert moved_messages.json()["messages"] == []
+
+    # Cancelling part-way leaves the messages not yet moved on the DLQ.
+    client.post(
+        "/redrive", data={"dlq_arn": orders_dlq, "csrf_token": csrf_module.CSRF_TOKEN}
+    )
+    task = stub.list_message_move_tasks(SourceArn=orders_dlq)["Results"][0]
+    stub._now = lambda: task["StartedTimestamp"] / 1000 + 1
+    cancelled = client.post(
+        "/cancel",
+        data={
+            "dlq_arn": orders_dlq,
+            "task_handle": task["TaskHandle"],
+            "csrf_token": csrf_module.CSRF_TOKEN,
+        },
+        follow_redirects=False,
+    )
+    assert cancelled.status_code == 303
+    task = stub.list_message_move_tasks(SourceArn=orders_dlq)["Results"][0]
+    assert task["Status"] == "CANCELLED"
+    assert task["ApproximateNumberOfMessagesMoved"] == 1
+    # Step past the visibility timeout left by the earlier sample.
+    stub._now = lambda: started + 60
+    remaining = client.get("/messages", params={"dlq_arn": orders_dlq})
+    assert len(remaining.json()["messages"]) == 1
+
+
 @mock_aws
 def test_routes_served_under_token_prefix(monkeypatch):
     sqs = boto3.client("sqs", region_name="eu-west-2")
@@ -410,7 +507,7 @@ def test_cancel_running_redrive(monkeypatch, move_tasks):
     page = client.get("/")
     assert "Cancel redrive" in page.text
     assert "Start redrive" not in page.text
-    assert "View messages" not in page.text
+    assert "Sample messages" not in page.text
 
     # The stubber checks the call against the real API model, which moto can't do for this operation.
     with Stubber(sqs_routes.get_sqs_client()) as stubber:

@@ -15,13 +15,17 @@
 
 @use 'govuk-frontend' as *;
 @use 'variables/colours' as *;
-@use 'variables/border-radius' as *;
+
+// The portal's entity table only breaks long words in its stacked mobile layout.
+.app-sqs__name {
+  overflow-wrap: anywhere;
+}
 
 .app-sqs__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: govuk-spacing(2);
-  align-items: center;
+  align-items: flex-start;
 
   form {
     display: flex;
@@ -31,7 +35,8 @@
     margin: 0;
   }
 
-  .govuk-input {
-    border-radius: $app-border-radius;
+  // The portal's input has a form-page minimum width; here it sits in a table row.
+  .app-input {
+    min-width: 0;
   }
 }
