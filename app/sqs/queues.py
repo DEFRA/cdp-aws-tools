@@ -18,6 +18,13 @@ COUNT_LAG_WINDOW_SECONDS = 5 * 60
 # AWS has no purge status to query, so the tool tracks the window itself.
 PURGE_WINDOW_SECONDS = 60
 
+# Long polling asks every SQS host; short polling samples a few and can return nothing.
+SAMPLE_WAIT_SECONDS = 2
+
+# How long a sample hides the messages it reads; redrive of that DLQ waits this long.
+# The hide must outlast the poll, or SQS hands the same message back to fill the batch.
+SAMPLE_HIDDEN_SECONDS = SAMPLE_WAIT_SECONDS + 1
+
 # AWS limit for StartMessageMoveTask MaxNumberOfMessagesPerSecond.
 MAX_MESSAGES_PER_SECOND = 500
 
@@ -94,6 +101,10 @@ def message_count(mapping: QueueMapping, client) -> int:
     return _count_messages(mapping, client, ["ApproximateNumberOfMessages"])
 
 
+def hidden_message_count(mapping: QueueMapping, client) -> int:
+    return _count_messages(mapping, client, ["ApproximateNumberOfMessagesNotVisible"])
+
+
 def purgeable_message_count(mapping: QueueMapping, client) -> int:
     # PurgeQueue also deletes messages that are in flight or delayed, not just the visible ones.
     return _count_messages(
@@ -144,14 +155,11 @@ def purge(client, mapping: QueueMapping) -> dict[str, Any]:
 
 
 def sample_messages(client, mapping: QueueMapping) -> list[dict[str, Any]]:
-    # Long polling asks every SQS host; short polling samples a few and can return nothing.
-    # The visibility timeout must outlast the poll, or SQS hands the same message back to fill the batch.
-    wait_seconds = 2
     response = client.receive_message(
         QueueUrl=dlq_url(mapping, client),
         MaxNumberOfMessages=10,
-        VisibilityTimeout=wait_seconds + 1,
-        WaitTimeSeconds=wait_seconds,
+        VisibilityTimeout=SAMPLE_HIDDEN_SECONDS,
+        WaitTimeSeconds=SAMPLE_WAIT_SECONDS,
         MessageSystemAttributeNames=["SentTimestamp"],
         MessageAttributeNames=["All"],
     )

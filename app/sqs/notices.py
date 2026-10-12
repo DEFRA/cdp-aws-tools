@@ -14,6 +14,10 @@ NOTICES = {
         "Queue name did not match {queue}. No messages were purged.",
     ),
     "redrive-running": ("error", "Cannot purge {queue} while a redrive is running."),
+    "messages-hidden": (
+        "error",
+        "Some messages in {queue} are hidden, for example by a recent sample. Try the redrive again in a moment.",
+    ),
     "purge-in-progress": (
         "error",
         "A purge of {queue} was already requested in the last 60 seconds. Try again in a minute.",
