@@ -6,6 +6,7 @@
 @use 'helpers';
 @use 'core';
 
+@use 'banner/banner';
 @use 'button/button';
 @use 'entity-table/entity-table';
 @use 'info/info';
@@ -15,6 +16,13 @@
 
 @use 'govuk-frontend' as *;
 @use 'variables/colours' as *;
+
+// The portal's banner is a toast over the page header. Here it sits above the table and stays.
+.app-sqs__banner {
+  position: static;
+  width: auto;
+  margin: 0 0 govuk-spacing(4);
+}
 
 // The portal's entity table only breaks long words in its stacked mobile layout.
 .app-sqs__name {
@@ -38,5 +46,16 @@
   // The portal's input has a form-page minimum width; here it sits in a table row.
   .app-input {
     min-width: 0;
+  }
+
+  .app-sqs__purge-details {
+    form {
+      display: block;
+    }
+
+    .app-input {
+      width: 100%;
+      margin-bottom: govuk-spacing(2);
+    }
   }
 }

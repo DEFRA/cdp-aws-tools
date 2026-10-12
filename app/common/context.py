@@ -9,6 +9,7 @@ def _to_bool(value: str | None) -> bool:
 def load_app_context() -> dict[str, object]:
     return {
         "show_message_content": _to_bool(os.getenv("SHOW_MESSAGE_CONTENT")),
+        "allow_purge": _to_bool(os.getenv("ALLOW_PURGE")),
         "service": os.getenv("SERVICE", ""),
         "environment": os.getenv("ENVIRONMENT", ""),
         "user_id": os.getenv("USER_ID", ""),

@@ -1,5 +1,29 @@
 {% extends "layout.html" %}
 
+{% macro submit_button(label, loading_text, modifier) %}
+  <span class="app-button__container">
+    <button
+      type="submit"
+      class="govuk-button app-button app-button--small app-button--{{ modifier }}"
+      data-js="app-button"
+      data-testid="app-button"
+    >
+      {{ label }}
+    </button>
+    <span
+      class="app-loader app-loader--with-adjacent-button"
+      data-testid="app-loader"
+      data-js="app-loader"
+    ></span>
+    <span
+      class="govuk-visually-hidden"
+      role="status"
+      data-js="app-loader-status"
+      data-loading-text="{{ loading_text }}"
+    ></span>
+  </span>
+{% endmacro %}
+
 {% block intro %}
   <p class="app-page-heading--intro">
     Your service's dead letter queues. A redrive moves their messages back to the source queue.
@@ -15,6 +39,12 @@
     'FAILED': 'govuk-tag--red',
     'CANCELLED': 'govuk-tag--grey'
   } %}
+  {% if banner %}
+    <div class="app-banner app-banner--{{ banner.type }} app-sqs__banner" role="{{ 'alert' if banner.type == 'error' else 'status' }}">
+      <p class="app-banner__content">{{ banner.text }}</p>
+    </div>
+    <script>history.replaceState(null, "", location.pathname)</script>
+  {% endif %}
   <article>
     <table class="app-entity-table">
       <thead class="app-entity-table__head">
@@ -39,6 +69,11 @@
             </td>
             <td class="app-entity-table__cell" data-label="Messages (approx.)">
               {{ "Unknown" if row.error else row.message_count }}
+              {% if row.purge_requested_at %}
+                <p class="govuk-body-s govuk-!-font-weight-bold govuk-!-margin-top-2 govuk-!-margin-bottom-0">
+                  Purge requested at {{ row.purge_requested_at }}. Messages can take up to a minute to disappear.
+                </p>
+              {% endif %}
               {% if row.count_may_lag %}
                 <p class="govuk-body-s govuk-!-font-weight-bold govuk-!-margin-top-2 govuk-!-margin-bottom-0">
                   May not have caught up yet. Refresh in a minute.
@@ -76,36 +111,19 @@
             </td>
             <td class="app-entity-table__cell" data-label="Actions">
               <div class="app-sqs__actions">
+                {% if row.purge_requested_at %}
+                  <p class="govuk-body-s govuk-hint govuk-!-margin-0">Actions available again in about a minute.</p>
+                {% endif %}
                 {% if task_active %}
                   {% if task.TaskHandle %}
                     <form method="post" action="{{ base_path }}/cancel" data-js="app-form">
                       <input type="hidden" name="dlq_arn" value="{{ row.dlq_arn }}" />
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                       <input type="hidden" name="task_handle" value="{{ task.TaskHandle }}" />
-                      <span class="app-button__container">
-                        <button
-                          type="submit"
-                          class="govuk-button app-button app-button--small app-button--destructive"
-                          data-js="app-button"
-                          data-testid="app-button"
-                        >
-                          Cancel redrive
-                        </button>
-                        <span
-                          class="app-loader app-loader--with-adjacent-button"
-                          data-testid="app-loader"
-                          data-js="app-loader"
-                        ></span>
-                        <span
-                          class="govuk-visually-hidden"
-                          role="status"
-                          data-js="app-loader-status"
-                          data-loading-text="Cancelling redrive"
-                        ></span>
-                      </span>
+                      {{ submit_button("Cancel redrive", "Cancelling redrive", "destructive") }}
                     </form>
                   {% endif %}
-                {% elif row.message_count | int > 0 %}
+                {% elif row.message_count | int > 0 and not row.purge_requested_at %}
                   <form
                     method="post"
                     action="{{ base_path }}/redrive"
@@ -132,28 +150,37 @@
                       />
                       <div class="govuk-input__suffix app-input__suffix" aria-hidden="true">msg/s</div>
                     </div>
-                    <span class="app-button__container">
-                      <button
-                        type="submit"
-                        class="govuk-button app-button app-button--small app-button--primary"
-                        data-js="app-button"
-                        data-testid="app-button"
-                      >
-                        Start redrive
-                      </button>
-                      <span
-                        class="app-loader app-loader--with-adjacent-button"
-                        data-testid="app-loader"
-                        data-js="app-loader"
-                      ></span>
-                      <span
-                        class="govuk-visually-hidden"
-                        role="status"
-                        data-js="app-loader-status"
-                        data-loading-text="Starting redrive"
-                      ></span>
-                    </span>
+                    {{ submit_button("Start redrive", "Starting redrive", "primary") }}
                   </form>
+                {% endif %}
+                {% if allow_purge and row.message_count | int > 0 and not task_active and not row.purge_requested_at %}
+                  <details class="govuk-details govuk-!-margin-0" data-module="govuk-details">
+                    <summary class="govuk-details__summary">
+                      <span class="govuk-details__summary-text">Purge queue</span>
+                    </summary>
+                    <div class="govuk-details__text app-sqs__purge-details">
+                      <p class="govuk-body-s govuk-!-margin-top-0 govuk-!-margin-bottom-2">
+                        Permanently deletes all messages in this dead letter queue. This cannot be undone.
+                      </p>
+                      <form method="post" action="{{ base_path }}/purge" data-js="app-form">
+                        <input type="hidden" name="dlq_arn" value="{{ row.dlq_arn }}" />
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                        <label class="govuk-label govuk-label--s" for="confirm-{{ loop.index }}">
+                          Type {{ row.dlq_name }} to confirm
+                        </label>
+                        <input
+                          class="govuk-input app-input"
+                          id="confirm-{{ loop.index }}"
+                          name="confirm_name"
+                          type="text"
+                          spellcheck="false"
+                          autocomplete="off"
+                          required
+                        />
+                        {{ submit_button("Purge queue", "Purging queue", "destructive") }}
+                      </form>
+                    </div>
+                  </details>
                 {% endif %}
                 {% if show_message_content and row.message_count | int > 0 and not task_active %}
                   <a
