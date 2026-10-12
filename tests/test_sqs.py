@@ -3,6 +3,7 @@ import importlib
 import json
 import os
 import time
+from datetime import timedelta
 from functools import lru_cache
 
 import boto3
@@ -541,6 +542,18 @@ def test_stub_mode_ui_sample_and_redrive(monkeypatch):
     assert moved_messages.json()["messages"] == []
 
     # Cancelling part-way leaves the messages not yet moved on the DLQ.
+    routes_module = importlib.import_module("app.sqs.routes")
+    real_datetime = routes_module.datetime
+
+    class _FutureDatetime:
+        @staticmethod
+        def now(tz=None):
+            return real_datetime.now(tz) + timedelta(
+                seconds=importlib.import_module("app.sqs.queues").SAMPLE_HIDDEN_SECONDS
+                + 1
+            )
+
+    monkeypatch.setattr(routes_module, "datetime", _FutureDatetime)
     client.post(
         "/redrive", data={"dlq_arn": orders_dlq, "csrf_token": csrf_module.CSRF_TOKEN}
     )
@@ -683,6 +696,88 @@ def test_redrive_rate_capped_to_aws_limit(monkeypatch):
 
     assert post("").status_code == 303
     assert "MaxNumberOfMessagesPerSecond" not in calls[-1]
+
+
+@mock_aws
+def test_redrive_refused_immediately_after_sampling_same_dlq(monkeypatch):
+    mappings, dlq, dlq_arn = _create_queues("claims")
+    boto3.client("sqs", region_name="eu-west-2").send_message(
+        QueueUrl=dlq, MessageBody="failed claim"
+    )
+    monkeypatch.setenv("SQS_QUEUES", mappings)
+    module = _load_module(monkeypatch, show_message_content="true")
+    client = TestClient(module.app)
+    csrf_module = importlib.import_module("app.common.csrf")
+    sqs_module = importlib.import_module("app.sqs.queues")
+
+    start_calls = []
+    real_client = sqs_module.get_sqs_client()
+    real_client.start_message_move_task = lambda **kwargs: (  # type: ignore[attr-defined]
+        start_calls.append(kwargs) or {"TaskHandle": "t"}
+    )
+    monkeypatch.setattr(sqs_module, "get_sqs_client", lambda: real_client)
+
+    sample = client.get("/messages", params={"dlq_arn": dlq_arn})
+    assert sample.status_code == 200
+    assert sample.json()["messages"]
+
+    redrive = client.post(
+        "/redrive",
+        data={"dlq_arn": dlq_arn, "csrf_token": csrf_module.CSRF_TOKEN},
+        follow_redirects=False,
+    )
+    assert redrive.status_code == 303
+    assert "notice=sample-recent" in redrive.headers["location"]
+    assert start_calls == []
+    assert (
+        "Messages in claims-deadletter are hidden for a few seconds after a sample. "
+        "Try the redrive again in a moment."
+    ) in client.get(redrive.headers["location"]).text
+
+
+@mock_aws
+def test_redrive_allowed_after_sampling_window(monkeypatch):
+    mappings, dlq, dlq_arn = _create_queues("claims")
+    boto3.client("sqs", region_name="eu-west-2").send_message(
+        QueueUrl=dlq, MessageBody="failed claim"
+    )
+    monkeypatch.setenv("SQS_QUEUES", mappings)
+    module = _load_module(monkeypatch, show_message_content="true")
+    client = TestClient(module.app)
+    csrf_module = importlib.import_module("app.common.csrf")
+    sqs_module = importlib.import_module("app.sqs.queues")
+    routes_module = importlib.import_module("app.sqs.routes")
+
+    start_calls = []
+    real_client = sqs_module.get_sqs_client()
+    real_client.start_message_move_task = lambda **kwargs: (  # type: ignore[attr-defined]
+        start_calls.append(kwargs) or {"TaskHandle": "t"}
+    )
+    monkeypatch.setattr(sqs_module, "get_sqs_client", lambda: real_client)
+
+    sample = client.get("/messages", params={"dlq_arn": dlq_arn})
+    assert sample.status_code == 200
+    assert sample.json()["messages"]
+
+    real_datetime = routes_module.datetime
+
+    class _FutureDatetime:
+        @staticmethod
+        def now(tz=None):
+            return real_datetime.now(tz) + timedelta(
+                seconds=sqs_module.SAMPLE_HIDDEN_SECONDS + 1
+            )
+
+    monkeypatch.setattr(routes_module, "datetime", _FutureDatetime)
+
+    redrive = client.post(
+        "/redrive",
+        data={"dlq_arn": dlq_arn, "csrf_token": csrf_module.CSRF_TOKEN},
+        follow_redirects=False,
+    )
+    assert redrive.status_code == 303
+    assert "notice=redrive-started" in redrive.headers["location"]
+    assert len(start_calls) == 1
 
 
 @mock_aws

@@ -23,6 +23,16 @@ def _active_purge_requested_at(
     return requested_at if elapsed < queues.PURGE_WINDOW_SECONDS else None
 
 
+def _active_sample_requested_at(
+    recent_samples: dict[str, datetime], dlq_arn: str
+) -> datetime | None:
+    requested_at = recent_samples.get(dlq_arn)
+    if requested_at is None:
+        return None
+    elapsed = (datetime.now(UTC) - requested_at).total_seconds()
+    return requested_at if elapsed < queues.SAMPLE_HIDDEN_SECONDS else None
+
+
 def _queue_row(
     mapping: queues.QueueMapping, client, recent_purges: dict[str, datetime]
 ) -> dict[str, Any]:
@@ -74,6 +84,7 @@ def create_router(
     queue_mappings = queues.load_queues()
     router = APIRouter()
     recent_purges: dict[str, datetime] = {}
+    recent_samples: dict[str, datetime] = {}
     dlq_names = {m.deadletter_queue_arn: m.dlq_name for m in queue_mappings}
 
     def _mapping_for_dlq(dlq_arn: str) -> queues.QueueMapping:
@@ -132,6 +143,10 @@ def create_router(
     ):
         csrf_or_403(request, csrf_token)
         mapping = _mapping_for_dlq(dlq_arn)
+        if _active_sample_requested_at(recent_samples, mapping.deadletter_queue_arn):
+            return notices.redirect_with_notice(
+                base_path, mapping.deadletter_queue_arn, "sample-recent"
+            )
         if _active_purge_requested_at(recent_purges, mapping.deadletter_queue_arn):
             return notices.redirect_with_notice(
                 base_path, mapping.deadletter_queue_arn, "purge-in-progress"
@@ -241,6 +256,7 @@ def create_router(
                 detail="Cannot inspect messages while redrive is running",
             )
         message_items = queues.sample_messages(client, mapping)
+        recent_samples[mapping.deadletter_queue_arn] = datetime.now(UTC)
         message_ids = [m["MessageId"] for m in message_items]
         write_audit(
             app_context,
