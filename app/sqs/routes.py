@@ -1,6 +1,7 @@
 import base64
 import time
 from datetime import UTC, datetime
+from time import monotonic
 from typing import Any
 
 from botocore.exceptions import ClientError
@@ -23,14 +24,12 @@ def _active_purge_requested_at(
     return requested_at if elapsed < queues.PURGE_WINDOW_SECONDS else None
 
 
-def _active_sample_requested_at(
-    recent_samples: dict[str, datetime], dlq_arn: str
-) -> datetime | None:
-    requested_at = recent_samples.get(dlq_arn)
-    if requested_at is None:
-        return None
-    elapsed = (datetime.now(UTC) - requested_at).total_seconds()
-    return requested_at if elapsed < queues.SAMPLE_HIDDEN_SECONDS else None
+def _sampled_recently(recent_samples: dict[str, float], dlq_arn: str) -> bool:
+    sampled_at = recent_samples.get(dlq_arn)
+    return (
+        sampled_at is not None
+        and monotonic() - sampled_at < queues.SAMPLE_HIDDEN_SECONDS
+    )
 
 
 def _queue_row(
@@ -84,7 +83,7 @@ def create_router(
     queue_mappings = queues.load_queues()
     router = APIRouter()
     recent_purges: dict[str, datetime] = {}
-    recent_samples: dict[str, datetime] = {}
+    recent_samples: dict[str, float] = {}
     dlq_names = {m.deadletter_queue_arn: m.dlq_name for m in queue_mappings}
 
     def _mapping_for_dlq(dlq_arn: str) -> queues.QueueMapping:
@@ -143,17 +142,22 @@ def create_router(
     ):
         csrf_or_403(request, csrf_token)
         mapping = _mapping_for_dlq(dlq_arn)
-        if _active_sample_requested_at(recent_samples, mapping.deadletter_queue_arn):
+        client = queues.get_sqs_client()
+        # A move task leaves hidden messages behind, so wait until they are visible again.
+        # AWS's count lags, so this tool's own recent samples are checked as well.
+        messages_hidden = (
+            _sampled_recently(recent_samples, mapping.deadletter_queue_arn)
+            or queues.hidden_message_count(mapping, client) > 0
+        )
+        if messages_hidden:
             return notices.redirect_with_notice(
-                base_path, mapping.deadletter_queue_arn, "sample-recent"
+                base_path, mapping.deadletter_queue_arn, "messages-hidden"
             )
         if _active_purge_requested_at(recent_purges, mapping.deadletter_queue_arn):
             return notices.redirect_with_notice(
                 base_path, mapping.deadletter_queue_arn, "purge-in-progress"
             )
-        response = queues.start_redrive(
-            queues.get_sqs_client(), mapping, max_messages_per_second
-        )
+        response = queues.start_redrive(client, mapping, max_messages_per_second)
         write_audit(
             app_context,
             "redrive.started",
@@ -255,8 +259,11 @@ def create_router(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Cannot inspect messages while redrive is running",
             )
+        # Stamp before the poll so a redrive during it is refused,
+        # and again after so the window covers the whole hide.
+        recent_samples[mapping.deadletter_queue_arn] = monotonic()
         message_items = queues.sample_messages(client, mapping)
-        recent_samples[mapping.deadletter_queue_arn] = datetime.now(UTC)
+        recent_samples[mapping.deadletter_queue_arn] = monotonic()
         message_ids = [m["MessageId"] for m in message_items]
         write_audit(
             app_context,

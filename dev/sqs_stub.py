@@ -81,12 +81,16 @@ class InMemorySqsStub:
         self._advance_move_tasks()
         queue_name = QueueUrl.rsplit("/", 1)[-1]
         now = self._now()
-        visible_count = sum(
-            1
-            for message in self._queue_messages.get(queue_name, [])
-            if message.invisible_until <= now
-        )
-        return {"Attributes": {"ApproximateNumberOfMessages": str(visible_count)}}
+        messages = self._queue_messages.get(queue_name, [])
+        visible_count = sum(1 for message in messages if message.invisible_until <= now)
+        return {
+            "Attributes": {
+                "ApproximateNumberOfMessages": str(visible_count),
+                "ApproximateNumberOfMessagesNotVisible": str(
+                    len(messages) - visible_count
+                ),
+            }
+        }
 
     def list_message_move_tasks(self, SourceArn: str, MaxResults: int = 1):
         _ = MaxResults
