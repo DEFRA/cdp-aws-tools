@@ -91,8 +91,7 @@
                   {{ task.Status | lower | capitalize }}
                 </strong>
                 <p class="govuk-body-s govuk-!-margin-top-2 govuk-!-margin-bottom-0">
-                  {{ task.ApproximateNumberOfMessagesMoved | default(0) }} of
-                  {{ task.ApproximateNumberOfMessagesToMove | default(0) }} moved
+                  {{ task.ApproximateNumberOfMessagesMoved | default(0) }} moved
                 </p>
                 {% if row.task_started_at %}
                   <p class="govuk-body-s govuk-!-margin-bottom-0">Started {{ row.task_started_at }}</p>
