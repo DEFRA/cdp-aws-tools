@@ -32,6 +32,7 @@ export SERVICE=demo-service
 export ENVIRONMENT=dev
 export USER_ID=local
 export USER_NAME="Local User"
+export AUDIT_LOG_PATH=/tmp/aws-tools.audit
 export SHOW_MESSAGE_CONTENT=true
 export ALLOW_PURGE=true
 export SQS_STUB_SAMPLE_COUNT=3

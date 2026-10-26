@@ -1,4 +1,5 @@
 import base64
+import json
 import time
 from datetime import UTC, datetime
 from time import monotonic
@@ -7,7 +8,7 @@ from typing import Any
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Form, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from fastapi.templating import Jinja2Templates
 
 from app.common import CSRF_TOKEN, csrf_or_403, write_audit
@@ -275,13 +276,15 @@ def create_router(
             },
         )
         # Binary message attributes arrive as bytes, which JSON can't carry.
-        return JSONResponse(
-            jsonable_encoder(
-                {"messages": message_items},
-                custom_encoder={
-                    bytes: lambda value: base64.b64encode(value).decode("ascii")
-                },
-            )
+        content = jsonable_encoder(
+            {"messages": message_items},
+            custom_encoder={
+                bytes: lambda value: base64.b64encode(value).decode("ascii")
+            },
+        )
+        return Response(
+            json.dumps(content, indent=2, ensure_ascii=False, allow_nan=False),
+            media_type="application/json",
         )
 
     @router.get("/health")
