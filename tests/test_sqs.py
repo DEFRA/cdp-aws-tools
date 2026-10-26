@@ -55,6 +55,32 @@ def test_messages_visible_with_flag(sqs, dlq, make_client):
     assert len(response.json()["messages"]) == 1
 
 
+def test_messages_output_indented(sqs, dlq, make_client):
+    sqs.send_message(QueueUrl=dlq.url, MessageBody="hello")
+    client = make_client(show_message_content=True)
+
+    response = client.sample(dlq.arn)
+    assert response.status_code == 200
+    assert response.text.startswith('{\n  "messages": [')
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "plain text",
+        '{"amount": 10.50, "big": 19.999999999999999999, "id": 1E3}',
+        '{"s": "NEW", "s": "PAID"}',
+        '{"x": "\\ud800"}',
+        '{"a": NaN}',
+    ],
+)
+def test_messages_body_is_original_text(sqs, dlq, make_client, body):
+    sqs.send_message(QueueUrl=dlq.url, MessageBody=body)
+    client = make_client(show_message_content=True)
+
+    assert client.sample(dlq.arn).json()["messages"][0]["Body"] == body
+
+
 def test_purge_hidden_without_flag(sqs, dlq, make_client):
     sqs.send_message(QueueUrl=dlq.url, MessageBody="world")
     client = make_client(show_message_content=True, allow_purge=False)
